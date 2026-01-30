@@ -5,7 +5,7 @@
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 
 namespace eval ::pretty_print {
-	variable version 0.1
+	variable version 0.2
 	namespace export pdict ptable
 }
 
@@ -89,6 +89,44 @@ proc ::pretty_print::pdict { d {i 0} {p "  "} {s " -> "} } {
 	return
 }
 
+# ::pretty_print::strip_ansi -- remove ANSI escape sequences from string
+# strip_ansi text
+#
+# Remove ANSI escape sequences (color codes, cursor movement, etc.)
+# from string. Useful for calculating visible width of colored text.
+#
+# Arguments:
+# text - string possibly containing ANSI escape sequences
+#
+# Side Effects:
+# None.
+#
+# Results:
+# String with all ANSI escape sequences removed.
+proc ::pretty_print::strip_ansi {text} {
+	# ANSI escape sequence pattern: ESC [ ... final_byte
+	# ESC is \x1b or \033, final byte is letter A-Z or a-z
+	regsub -all {\x1b\[[0-9;]*[A-Za-z]} $text {} result
+	return $result
+}
+
+# ::pretty_print::visible_length -- calculate visible length of string
+# visible_length text
+#
+# Calculate visible length of string ignoring ANSI escape sequences.
+#
+# Arguments:
+# text - string possibly containing ANSI escape sequences
+#
+# Side Effects:
+# None.
+#
+# Results:
+# Integer with visible character count.
+proc ::pretty_print::visible_length {text} {
+	return [string length [strip_ansi $text]]
+}
+
 # ::pretty_print::wrap_text -- wrap long string
 # wrap_text text max_width
 #
@@ -145,6 +183,35 @@ proc ::pretty_print::wrap_text {text max_width} {
 	return $lines
 }
 
+# ::pretty_print::pad_ansi -- pad string with ANSI codes to visible width
+# pad_ansi text width ?align
+#
+# Pad string containing ANSI codes to specified visible width.
+#
+# Arguments:
+# text  - string possibly containing ANSI escape sequences
+# width - desired visible width
+# align - "left" (default) or "right"
+#
+# Side Effects:
+# None.
+#
+# Results:
+# Padded string.
+proc ::pretty_print::pad_ansi {text width {align "left"}} {
+	set visible_len [visible_length $text]
+	set padding [expr {$width - $visible_len}]
+	if {$padding <= 0} {
+		return $text
+	}
+	set spaces [string repeat " " $padding]
+	if {$align eq "right"} {
+		return "${spaces}${text}"
+	} else {
+		return "${text}${spaces}"
+	}
+}
+
 # ::pretty_print::ptable -- print data as table
 # ptable ?arguments dict_list
 #
@@ -194,13 +261,14 @@ proc ::pretty_print::ptable {args} {
 		set columns $column_order
 	}
 	# Calculate column widths (capped at max_col_width)
+	# Use visible_length to handle ANSI codes
 	set widths [dict create]
 	foreach col $columns {
 		set max_width [string length $col]
 		foreach d $dict_list {
 			if {[dict exists $d $col]} {
 				set val [dict get $d $col]
-				set len [string length $val]
+				set len [visible_length $val]
 				if {$len > $max_width} {
 					set max_width $len
 				}
@@ -229,10 +297,11 @@ proc ::pretty_print::ptable {args} {
 		foreach col $columns {
 			set width [dict get $widths $col]
 			set val [expr {[dict exists $d $col] ? [dict get $d $col] : "-"}]
-			# Check if numeric (don't wrap numbers)
-			set is_num [string is double -strict $val]
+			# Check if numeric (use stripped value for check)
+			set stripped_val [strip_ansi $val]
+			set is_num [string is double -strict $stripped_val]
 			# Wrap text, keep numbers as-is
-			if {!$is_num && [string length $val] > $width} {
+			if {!$is_num && [visible_length $val] > $width} {
 				set lines [wrap_text $val $width]
 			} else {
 				set lines [list $val]
@@ -250,10 +319,11 @@ proc ::pretty_print::ptable {args} {
 				lassign [dict get $cell_lines $col] lines is_num
 				set val [expr {$i < [llength $lines] ? [lindex $lines $i] : ""}]
 				# Right align numbers, left align text
+				# Use pad_ansi for proper padding with ANSI codes
 				if {$is_num && $val ne ""} {
-					lappend row_parts [format "%*s" $width $val]
+					lappend row_parts [pad_ansi $val $width "right"]
 				} else {
-					lappend row_parts [format "%-*s" $width $val]
+					lappend row_parts [pad_ansi $val $width "left"]
 				}
 			}
 			puts [join $row_parts " | "]

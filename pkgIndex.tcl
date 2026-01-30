@@ -9,7 +9,7 @@
 # full path name of this file's directory.
 
 package ifneeded args 1.0 [list source [file join $dir args.tcl]]
-package ifneeded pretty_print 0.1 [list source [file join $dir pretty_print.tcl]]
+package ifneeded pretty_print 0.2 [list source [file join $dir pretty_print.tcl]]
 
 # Local Variables:
 # mode: tcl
